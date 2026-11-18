@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<title>Aftelklok GTA VI tot 00:00</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bungee&family=Inter:wght@600;700&display=swap" rel="stylesheet">
+<style>
+  /* Opties achter het adres:
+     ?bg=1        donkere achtergrond (voor venster-opname)
+     ?bg=groen    groene achtergrond, weg te filteren met chroma key (green screen)
+     ?test=75     test: tel af vanaf 75 seconden (probeer ook 3605, 305, 15)
+     ?geluid=0    zonder geluid
+     Combineren kan: ?test=15&bg=1 */
+  :root { --pink:#FF4FA3; --teal:#2EE6D6; --gold:#FFD166; --ink:#FFF1E6; --ground:#170B26; }
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  body.bg { background: var(--ground); }
+  /* ?bg=groen: fel groen scherm om weg te filteren met een chroma key (green screen). Gloed buiten het vak uit, anders blijven er randjes. */
+  body.groen { background: #00FF00; }
+  body.groen .klok { box-shadow: none !important; }
+  body { display: flex; align-items: center; justify-content: center; font-family: Inter, system-ui, sans-serif; color: var(--ink); }
+
+  .klok {
+    position: relative; z-index: 2;
+    display: inline-flex; align-items: center; gap: 22px;
+    padding: 16px 28px;
+    background: rgba(23, 11, 38, 0.88);
+    border: 2px solid rgba(255, 79, 163, 0.6);
+    border-radius: 20px;
+    box-shadow: 0 0 30px rgba(255, 79, 163, 0.35);
+    transform-origin: center;
+  }
+  .label { display: flex; flex-direction: column; gap: 4px; }
+  .k { font-size: 15px; font-weight: 700; letter-spacing: 0.16em; color: var(--teal); }
+  .sub { font-size: 18px; font-weight: 600; }
+  .tijd {
+    font-family: Bungee, Inter, sans-serif; font-size: 56px; line-height: 1;
+    color: var(--pink); text-shadow: 0 0 18px rgba(255, 79, 163, 0.55);
+    font-variant-numeric: tabular-nums; letter-spacing: 0.02em;
+    min-width: 4.6em; text-align: center;
+    transition: color .2s, font-size .2s;
+  }
+
+  /* Mijlpalen (1 uur, 30, 15, 10, 5 min, 1 min): drie keer rustig in en uit zoomen met gloed. */
+  .mijlpaal { animation: mijl 1s ease-in-out 3; }
+  @keyframes mijl {
+    0%, 100% { transform: scale(1); box-shadow: 0 0 30px rgba(255,79,163,.35); }
+    50% { transform: scale(1.15); box-shadow: 0 0 70px rgba(255,79,163,.85); }
+  }
+  /* Laatste minuut: zachte tik per seconde. */
+  .tik { animation: tik .6s ease-out 1; }
+  @keyframes tik { 0% { transform: scale(1.06); } 100% { transform: scale(1); } }
+  /* Laatste 10 seconden: harder. */
+  .tik-hard { animation: tikhard .7s ease-out 1; }
+  @keyframes tikhard {
+    0% { transform: scale(1.14); box-shadow: 0 0 80px rgba(255,79,163,.9); }
+    100% { transform: scale(1); box-shadow: 0 0 30px rgba(255,79,163,.35); }
+  }
+  .laatste10 { border-color: rgba(255,79,163,.95); }
+  /* 3, 2, 1: andere kleur en groot. */
+  .finale .tijd { color: var(--gold); text-shadow: 0 0 26px rgba(255,209,102,.8); font-size: 84px; }
+  .finale { border-color: rgba(255,209,102,.9); }
+  .finale-tik { animation: finale .9s cubic-bezier(.2,1.6,.4,1) 1; }
+  @keyframes finale { 0% { transform: scale(1.35); } 100% { transform: scale(1); } }
+  /* 00:00 */
+  .nu .tijd { color: var(--teal); text-shadow: 0 0 30px rgba(46,230,214,.9); font-size: 72px; }
+  .nu { border-color: rgba(46,230,214,.9); animation: nu 1.2s ease-in-out 4; }
+  @keyframes nu {
+    0%, 100% { transform: scale(1); box-shadow: 0 0 40px rgba(46,230,214,.5); }
+    50% { transform: scale(1.12); box-shadow: 0 0 90px rgba(46,230,214,.95); }
+  }
+
+  canvas { position: fixed; inset: 0; z-index: 1; pointer-events: none; }
+  .hint {
+    position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 3;
+    font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 999px;
+    background: rgba(23,11,38,.9); border: 1px solid var(--teal); color: var(--teal);
+    display: none; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+  <canvas id="fx"></canvas>
+  <div class="klok" id="klok" role="timer" aria-live="off">
+    <div class="label">
+      <div class="k">AFTELLEN</div>
+      <div class="sub" id="sub">GTA VI</div>
+    </div>
+    <div class="tijd" id="tijd">--:--:--</div>
+  </div>
+  <button class="hint" id="hint" type="button">Klik 1x om het geluid aan te zetten</button>
+
+<script>
+  const params = new URLSearchParams(location.search);
+  if (params.get('bg') === '1') document.body.classList.add('bg');
+  if (params.get('bg') === 'groen') document.body.classList.add('groen');
+  const geluidAan = params.get('geluid') !== '0';
+
+  // Doel: de eerstvolgende middernacht (tijd van je Mac), of ?test=seconden vanaf nu.
+  const doel = new Date();
+  const test = parseInt(params.get('test'), 10);
+  if (test > 0) doel.setTime(Date.now() + test * 1000);
+  else doel.setHours(24, 0, 0, 0);
+
+  const klok = document.getElementById('klok');
+  const tijdEl = document.getElementById('tijd');
+  const subEl = document.getElementById('sub');
+  const hint = document.getElementById('hint');
+  const twee = (n) => String(n).padStart(2, '0');
+
+  // ---------- Geluid (Web Audio, geen bestanden nodig) ----------
+  let ctx = null;
+  function audio() {
+    if (!geluidAan) return null;
+    if (!ctx) { try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    return ctx;
+  }
+  function piep(freq, duur, volume, vorm, wacht) {
+    const a = audio(); if (!a) return;
+    const t0 = a.currentTime + (wacht || 0);
+    const o = a.createOscillator(), g = a.createGain();
+    o.type = vorm || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(volume, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + duur);
+    o.connect(g).connect(a.destination);
+    o.start(t0); o.stop(t0 + duur + 0.05);
+  }
+  const geluid = {
+    tik:      () => piep(880, 0.06, 0.08, 'sine'),
+    mijlpaal: () => { piep(660, 0.16, 0.25, 'triangle'); piep(990, 0.22, 0.25, 'triangle', 0.18); },
+    hard:     () => piep(1046, 0.14, 0.35, 'square'),
+    finale:   () => { piep(1318, 0.28, 0.45, 'square'); piep(659, 0.28, 0.2, 'sine'); },
+    nu: () => {
+      [523, 659, 784, 1046].forEach((f, i) => piep(f, 0.18, 0.35, 'square', i * 0.11));
+      [523, 659, 784, 1046].forEach((f) => piep(f, 1.6, 0.18, 'sawtooth', 0.48));
+    },
+  };
+  // Browsers spelen pas geluid na één klik. Toon dan een klein knopje.
+  function checkGeluid() {
+    if (!geluidAan) return;
+    const a = audio();
+    hint.style.display = (a && a.state === 'suspended') ? 'block' : 'none';
+  }
+  ['click', 'keydown', 'pointerdown'].forEach((ev) => window.addEventListener(ev, () => { audio(); setTimeout(checkGeluid, 100); }));
+
+  // ---------- Animaties ----------
+  function speel(klasse) {
+    klok.classList.remove('mijlpaal', 'tik', 'tik-hard', 'finale-tik');
+    void klok.offsetWidth; // herstart de animatie
+    klok.classList.add(klasse);
+  }
+  let subTimer = null;
+  function meldSub(tekst, ms) {
+    subEl.textContent = tekst;
+    clearTimeout(subTimer);
+    subTimer = setTimeout(() => { if (!klok.classList.contains('nu')) subEl.textContent = 'GTA VI'; }, ms);
+  }
+
+  // ---------- Vuurwerk-effect op 00:00 ----------
+  const cv = document.getElementById('fx'), c2 = cv.getContext('2d');
+  let deeltjes = [], fxLoopt = false;
+  function maatCanvas() { cv.width = innerWidth * devicePixelRatio; cv.height = innerHeight * devicePixelRatio; }
+  addEventListener('resize', maatCanvas); maatCanvas();
+  function knal(x, y) {
+    const kleuren = ['#FF4FA3', '#2EE6D6', '#FFD166', '#FFF1E6'];
+    for (let i = 0; i < 90; i++) {
+      const hoek = Math.random() * Math.PI * 2, snel = 2 + Math.random() * 7;
+      deeltjes.push({ x, y, vx: Math.cos(hoek) * snel, vy: Math.sin(hoek) * snel - 2, leven: 1, kleur: kleuren[i % 4], r: 2 + Math.random() * 3 });
+    }
+    if (!fxLoopt) { fxLoopt = true; requestAnimationFrame(teken); }
+  }
+  function teken() {
+    const d = devicePixelRatio;
+    c2.clearRect(0, 0, cv.width, cv.height);
+    deeltjes.forEach((p) => {
+      p.x += p.vx; p.y += p.vy; p.vy += 0.12; p.vx *= 0.99; p.leven -= 0.012;
+      c2.globalAlpha = Math.max(0, p.leven);
+      c2.fillStyle = p.kleur;
+      c2.beginPath(); c2.arc(p.x * d, p.y * d, p.r * d, 0, Math.PI * 2); c2.fill();
+    });
+    deeltjes = deeltjes.filter((p) => p.leven > 0);
+    if (deeltjes.length) requestAnimationFrame(teken); else { fxLoopt = false; c2.clearRect(0, 0, cv.width, cv.height); }
+  }
+  function vuurwerk() {
+    const r = klok.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    knal(cx, cy);
+    setTimeout(() => knal(cx - r.width * 0.4, cy - 10), 450);
+    setTimeout(() => knal(cx + r.width * 0.4, cy - 10), 900);
+    setTimeout(() => knal(cx, cy - 20), 1400);
+  }
+
+  // ---------- De klok ----------
+  const mijlpalen = { 3600: 'Nog 1 uur!', 1800: 'Nog 30 min!', 900: 'Nog 15 min!', 600: 'Nog 10 min!', 300: 'Nog 5 min!', 60: 'Nog 1 minuut!' };
+  let vorige = null, klaar = false;
+
+  function toon(rest) {
+    const u = Math.floor(rest / 3600), m = Math.floor((rest % 3600) / 60), s = rest % 60;
+    if (rest <= 3 && rest > 0) tijdEl.textContent = String(rest);
+    else tijdEl.textContent = twee(u) + ':' + twee(m) + ':' + twee(s);
+  }
+
+  function tik() {
+    const rest = Math.max(0, Math.ceil((doel - Date.now()) / 1000));
+    if (rest === vorige) return;
+    const eerste = vorige === null;
+    vorige = rest;
+    if (klaar) return;
+    toon(rest);
+    if (eerste && rest > 0) return; // bij het openen geen geluid of effect
+
+    if (rest === 0) {
+      klaar = true;
+      klok.classList.remove('finale', 'laatste10', 'mijlpaal', 'tik', 'tik-hard', 'finale-tik');
+      klok.classList.add('nu');
+      tijdEl.textContent = 'NU!';
+      subEl.textContent = 'Het is zover!';
+      geluid.nu();
+      vuurwerk();
+      setTimeout(() => { tijdEl.textContent = '00:00:00'; }, 5000);
+      return;
+    }
+    if (rest <= 3) {
+      klok.classList.add('finale');
+      geluid.finale();
+      speel('finale-tik');
+    } else if (rest <= 10) {
+      klok.classList.add('laatste10');
+      geluid.hard();
+      speel('tik-hard');
+    } else if (mijlpalen[rest]) {
+      meldSub(mijlpalen[rest], 5000);
+      geluid.mijlpaal();
+      speel('mijlpaal');
+    } else if (rest < 60) {
+      geluid.tik();
+      speel('tik');
+    }
+  }
+
+  tik();
+  setInterval(tik, 100);
+  setTimeout(checkGeluid, 500);
+</script>
+</body>
+</html>
