@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<title>Speler</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* Opties achter het adres:
+     ?kanaal=UCxxxxxxxx     je YouTube-kanaal-ID: toont altijd je live van dat moment (aanrader)
+     ?v=xxxxxxxxxxx         of: de ID van één bepaalde livestream/video
+     ?url=<YouTube-link>    of: plak gewoon de link van de stream
+     ?geluid=0              zonder geluid (standaard probeert hij met geluid)
+     ?kwaliteit=480         lagere kwaliteit = minder laden (360, 480, 720 of auto; standaard 720)
+     ?zoom=1.05             iets inzoomen om randjes en knoppen van YouTube weg te snijden
+     ?rand=0                geen gekleurde rand rond de video
+     ?thema=fortnite|gta    altijd één thema (anders: Fortnite voor 00:00, GTA 6 vanaf 00:00)
+     ?test=20               test: wissel van thema na 20 seconden
+     Voorbeeld: speler.html?kanaal=UC1234567890abcdef&zoom=1.04 */
+
+  /* Fortnite-thema (piraat, goud) */
+  body { --rand: #F2B544; --gloed: rgba(242, 181, 68, 0.55); --hoek: #F5F5F2; --grond: #0E1116; }
+  /* GTA 6-thema (neon, roze en turquoise) */
+  body.gta { --rand: #FF4FA3; --gloed: rgba(255, 79, 163, 0.6); --hoek: #2EE6D6; --grond: #170B26; }
+
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body { background: var(--grond); transition: background 1.5s; }
+  .vak { position: fixed; inset: 0; overflow: hidden; }
+  .vak iframe, #speler { position: absolute; left: 50%; top: 50%; border: 0; transform-origin: center; }
+
+  .rand { position: fixed; inset: 0; pointer-events: none; z-index: 2; }
+  .lijn { position: absolute; left: 0; right: 0; height: 5px; background: var(--rand); box-shadow: 0 0 18px var(--gloed); transition: background 1.5s, box-shadow 1.5s; }
+  .lijn.boven { top: 0; } .lijn.onder { bottom: 0; }
+  .hoek { position: absolute; width: 5%; aspect-ratio: 1; min-width: 28px; border: 0 solid var(--hoek); transition: border-color 1.5s; }
+  .hoek.lb { left: 2%; top: 4%; border-top-width: 4px; border-left-width: 4px; }
+  .hoek.rb { right: 2%; top: 4%; border-top-width: 4px; border-right-width: 4px; }
+  .hoek.lo { left: 2%; bottom: 4%; border-bottom-width: 4px; border-left-width: 4px; }
+  .hoek.ro { right: 2%; bottom: 4%; border-bottom-width: 4px; border-right-width: 4px; }
+  body.zonder-rand .rand { display: none; }
+
+  .golf { position: fixed; inset: 0; pointer-events: none; z-index: 3; opacity: 0; }
+  .golf.aan { animation: golf 2.2s ease-out 1; }
+  @keyframes golf {
+    0% { opacity: 0; box-shadow: inset 0 0 0 0 var(--gloed); }
+    25% { opacity: 1; box-shadow: inset 0 0 120px 20px var(--gloed); }
+    100% { opacity: 0; box-shadow: inset 0 0 0 0 var(--gloed); }
+  }
+
+  /* Doorzichtige laag die een klik opvangt om het geluid aan te zetten. */
+  .klik { position: fixed; inset: 0; z-index: 4; background: transparent; border: 0; padding: 0; cursor: pointer; }
+  .hint {
+    position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 5; pointer-events: none;
+    font: 600 14px Inter, system-ui, sans-serif; padding: 6px 14px; border-radius: 999px;
+    background: rgba(0,0,0,.75); border: 1px solid var(--rand); color: #FFF1E6; display: none;
+  }
+
+  .uitleg {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: var(--grond); color: #FFF1E6; font: 600 18px/1.5 Inter, system-ui, sans-serif; text-align: center; padding: 24px;
+  }
+  .uitleg b { color: var(--rand); }
+  code { background: rgba(255,255,255,.08); padding: 2px 6px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<div class="vak" id="vak"><div id="speler"></div></div>
+<div class="rand" aria-hidden="true">
+  <div class="lijn boven"></div><div class="lijn onder"></div>
+  <div class="hoek lb"></div><div class="hoek rb"></div><div class="hoek lo"></div><div class="hoek ro"></div>
+</div>
+<div class="golf" id="golf"></div>
+<button class="klik" id="klik" type="button" aria-label="Geluid aanzetten"></button>
+<div class="hint" id="hint">Klik 1x voor geluid</div>
+<script>
+  const p = new URLSearchParams(location.search);
+  if (p.get('rand') === '0') document.body.classList.add('zonder-rand');
+
+  // ---------- Thema: Fortnite voor 00:00, GTA 6 vanaf 00:00 (tijd van je Mac) ----------
+  const vast = p.get('thema');
+  const test = parseInt(p.get('test'), 10);
+  const wissel = new Date();
+  if (test > 0) wissel.setTime(Date.now() + test * 1000);
+  else wissel.setHours(24, 0, 0, 0);
+  let gta = vast === 'gta' || (vast !== 'fortnite' && !(test > 0) && new Date().getHours() < 6);
+  document.body.classList.toggle('gta', gta);
+  setInterval(() => {
+    if (vast || gta || Date.now() < wissel.getTime()) return;
+    gta = true;
+    document.body.classList.add('gta');
+    const g = document.getElementById('golf');
+    g.classList.remove('aan'); void g.offsetWidth; g.classList.add('aan');
+  }, 250);
+
+  // ---------- De video (YouTube IFrame API, zodat het geluid aangezet kan worden) ----------
+  function idUitUrl(u) {
+    try {
+      const url = new URL(u);
+      if (url.searchParams.get('v')) return url.searchParams.get('v');
+      const m = url.pathname.match(/\/(?:live|embed|shorts)\/([\w-]{11})/) || (url.hostname.includes('youtu.be') && url.pathname.match(/\/([\w-]{11})/));
+      return m ? m[1] : null;
+    } catch (e) { return null; }
+  }
+  const kanaal = p.get('kanaal');
+  const v = p.get('v') || (p.get('url') ? idUitUrl(p.get('url')) : null);
+  const geluidAan = p.get('geluid') !== '0';
+  const zoom = Math.min(1.5, Math.max(1, parseFloat(p.get('zoom')) || 1));
+  const klik = document.getElementById('klik'), hint = document.getElementById('hint');
+
+  // Kwaliteit: YouTube kiest de resolutie op basis van hoe groot de speler is.
+  // Daarom maken we de speler zelf klein (bv. 854x480) en vergroten we hem daarna met CSS.
+  const maten = { '360': [640, 360], '480': [854, 480], '720': [1280, 720] };
+  const kw = (p.get('kwaliteit') || '720').toLowerCase();
+  const maat = maten[kw] || null; // 'auto' of onbekend: volle grootte
+  function plaats(f) {
+    if (!f) return;
+    let w, h;
+    if (maat) { [w, h] = maat; } else { w = innerWidth; h = innerHeight; }
+    f.style.width = w + 'px';
+    f.style.height = h + 'px';
+    const s = Math.min(innerWidth / w, innerHeight / h) * zoom;
+    f.style.transform = 'translate(-50%, -50%) scale(' + s + ')';
+  }
+
+  if (!kanaal && !v) {
+    klik.style.display = 'none';
+    document.getElementById('vak').innerHTML = '<div class="uitleg"><div>Zet je YouTube-kanaal achter het adres:<br>' +
+      '<code>speler.html?kanaal=<b>UC…</b></code><br>of de link van je stream:<br>' +
+      '<code>speler.html?url=<b>https://youtube.com/live/…</b></code></div></div>';
+  } else {
+    let speler = null, heeftGeluid = false;
+    const vars = { autoplay: 1, mute: 1, controls: 0, rel: 0, playsinline: 1, iv_load_policy: 3, disablekb: 1, fs: 0 };
+    if (kanaal) vars.channel = kanaal;
+
+    window.onYouTubeIframeAPIReady = function () {
+      speler = new YT.Player('speler', {
+        videoId: kanaal ? 'live_stream' : v,
+        width: maat ? maat[0] : innerWidth,
+        height: maat ? maat[1] : innerHeight,
+        playerVars: vars,
+        events: {
+          onReady: (e) => {
+            const f = e.target.getIframe();
+            plaats(f);
+            addEventListener('resize', () => plaats(f));
+            f.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
+            e.target.mute(); e.target.playVideo();
+            if (geluidAan) setTimeout(probeerGeluid, 1200);
+          },
+        },
+      });
+    };
+
+    // Probeer het geluid vanzelf aan te zetten. Blokkeert de browser dat (de video pauzeert),
+    // dan weer stil verder spelen en het knopje "Klik 1x voor geluid" tonen.
+    function probeerGeluid() {
+      if (!speler) return;
+      speler.unMute(); speler.setVolume(100); speler.playVideo();
+      setTimeout(() => {
+        const staat = speler.getPlayerState();
+        if (staat === 2 || staat === -1 || speler.isMuted()) {
+          speler.mute(); speler.playVideo();
+          hint.style.display = 'block';
+        } else { heeftGeluid = true; hint.style.display = 'none'; }
+      }, 900);
+    }
+    klik.addEventListener('click', () => {
+      if (!speler || !geluidAan) return;
+      speler.unMute(); speler.setVolume(100); speler.playVideo();
+      heeftGeluid = true; hint.style.display = 'none';
+    });
+
+    const s = document.createElement('script');
+    s.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(s);
+  }
+</script>
+</body>
+</html>
